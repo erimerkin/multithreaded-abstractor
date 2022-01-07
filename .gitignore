@@ -1,0 +1,5 @@
+.DS_Store
+abstracts
+*.txt
+*.o
+*.out
