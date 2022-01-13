@@ -1,7 +1,25 @@
 /**
  * @file main.cpp
- * @author erim erkin dogan
+ * @author erim erkin dogan - 2019400225
  * @brief Main class for an abstractor, that searches given words in given files and calculates closeness score
+ * 
+ *  This program utilizes multiple threads to read and score word availability in given abstracts. Searched words,
+ *  thread count and returned result size is all depends on given input file. Outputs are printed to the file given in
+ *  command line execution, also the program will delete the contents of the file before writing to it. Input file will
+ *  be read from main process and correspoding threads and list will be created. The reading is done via line by line and 
+ *  word by word (ignoring whitespaces). The program also compares number of abstract files and number of threads and if the
+ *  number of abstract files given is smaller than thread count, it will change the count to abstract file count.
+ * 
+ *  There are 4 global variables that will be shared across all threads: a string vector holding the words that will be searched (words);
+ *  a queue that stores unprocessed abstracts(waitingAbstracts); vector of shared pointers to Abstract objects that stores score, 
+ *  summary and filename (processedAbstracts); an output file stream so that all threads can write what they are processing (outputFile).
+ *  Operations on these 4 global variables are done with 2 mutex locks in different parts of the function: queueMutex is locked when a 
+ *  thread tries to find a new abstract to read and process, and write the information that it is processing that abstract; vectorPushMutex
+ *  is used for pushing created shared pointers to Abstract objects so it is locked for that operation only. Also use of shared_ptr ensures
+ *  that created object is accessible from main thread which then sorts and parses it to generate results and outputs.
+ * 
+ *  Note: While reading abstracts the path is set in a way that all the abstracts will be in ../abstracts folder relative to the executable.
+ *  So if the program is ran from another directory which doesn't have the abstacts folder that stores the files, the output will be wrong.
  * 
  *  Input arguments needs to be given in ABSOLUTE PATH.
  *  Running:
@@ -21,55 +39,59 @@
 #include "abstract.h"
 
 // MUTEX INITIALIZATION
-pthread_mutex_t processed_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t unprocessed_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t vectorPushMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t queueMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // GLOBAL VARIABLES
 vector<string> words;
-queue<shared_ptr<Abstract>> unprocessed_abstracts;
-vector<shared_ptr<Abstract>> processed_abstracts;
+queue<string> waitingAbstracts;
+vector<shared_ptr<Abstract>> processedAbstracts;
 
 // OUTPUT FILE STREAM
 ofstream outputFile;
 
+/**
+ * @brief multithread part of the program, gets location and name of abstract file from queue and calculates the score, then pushes result to a vector
+ * 
+ * @param params character of thread (like thread A, B, C)
+ */
 void *calculateScore(void *params)
 {
     while (1)
     {
         // Initialize strings and vectors to store read data
         string token;
-        vector<vector<string>> tokenized_data;
+        vector<vector<string>> tokenizedData;
         vector<string> sentence;
 
-        // A pointer to abstract class,
-        shared_ptr<Abstract> current_abstract;
+        // ID of thread
         char id = *(char *)params;
 
         ///////////////////////
         // Critical path, lock mutex for queue and printing to file
-        pthread_mutex_lock(&unprocessed_mutex);
+        pthread_mutex_lock(&queueMutex);
 
         // Check if any element is left in the queue, if queue is empty quit
-        if (unprocessed_abstracts.empty())
+        if (waitingAbstracts.empty())
         {
-            pthread_mutex_unlock(&unprocessed_mutex);
+            pthread_mutex_unlock(&queueMutex);
             break;
         }
 
         // Get the first element from queue and remove it
-        current_abstract = unprocessed_abstracts.front();
-        unprocessed_abstracts.pop();
+        string poppedAbstract = waitingAbstracts.front();
+        waitingAbstracts.pop();
 
-        outputFile << "Thread " << id << " is calculating " << current_abstract->filename << "\n";
+        outputFile << "Thread " << id << " is calculating " << poppedAbstract << "\n";
 
-        pthread_mutex_unlock(&unprocessed_mutex); // Unlock mutex
+        pthread_mutex_unlock(&queueMutex); // Unlock mutex
 
         ///////////////////////////
 
         // Opens input abstract file
         ifstream abstractFile;
-        string testName = "../abstracts/" + current_abstract->filename;
-        abstractFile.open(testName);
+        string absolutePath = "../abstracts/" + poppedAbstract;
+        abstractFile.open(absolutePath);
 
         // Reading word by word seperated by whitespace
         while (abstractFile >> token)
@@ -79,7 +101,7 @@ void *calculateScore(void *params)
             // If the read character is a dot, finish the sentence and push it.
             if (token.compare(".") == 0)
             {
-                tokenized_data.push_back(sentence);
+                tokenizedData.push_back(sentence);
                 sentence.clear();
             }
         }
@@ -87,47 +109,51 @@ void *calculateScore(void *params)
         abstractFile.close(); // Close the file
 
         // Sets to keep unique words
-        unordered_set<string> intersection_of_words;
-        unordered_set<string> union_of_words;
+        unordered_set<string> intersectionOfWords;
+        unordered_set<string> unionOfWords;
+
+        // Creating a shared pointer to a new Abstract object which will store our results
+        shared_ptr<Abstract> currentAbstract = make_shared<Abstract>(poppedAbstract);
 
         // Iterating by word by word basis on sentences
-        for (auto tokenized_sentence : tokenized_data)
+        for (auto tokenizedSentence : tokenizedData)
         {
-            bool found = false;
-            for (auto tokenized_item : tokenized_sentence)
+            bool sentenceHasTheWord = false;
+            for (auto tokenizedItem : tokenizedSentence)
             {
                 // Compare the abstract content with given words via word by word comparison
                 for (auto word : words)
                 {
                     // Adding given words to the unique words set
-                    union_of_words.insert(word);
+                    unionOfWords.insert(word);
 
                     // Adding word to the union
-                    union_of_words.insert(tokenized_item);
+                    unionOfWords.insert(tokenizedItem);
 
                     // Comparing words, and if the sentence has the word, add it to the summary.
-                    if (word.compare(tokenized_item) == 0)
+                    if (word.compare(tokenizedItem) == 0)
                     {
-                        if (!found)
+                        // If a sentence has more than 1 intersect with words, this ensures sentence is not added again
+                        if (!sentenceHasTheWord)
                         {
-                            current_abstract->summary.push_back(tokenized_sentence);
-                            found = true;
+                            currentAbstract->summary.push_back(tokenizedSentence);
+                            sentenceHasTheWord = true;
                         }
-                        intersection_of_words.insert(tokenized_item);
+                        intersectionOfWords.insert(tokenizedItem);
                     }
                 }
             }
         }
 
         // Assigning tokens and score to class
-        current_abstract->tokens = tokenized_data;
-        current_abstract->score = 1.0 * intersection_of_words.size() / union_of_words.size();
+        currentAbstract->tokens = tokenizedData;
+        currentAbstract->score = 1.0 * intersectionOfWords.size() / unionOfWords.size();
 
         //////////////////////////////////////////////
         // Locking the mutex to push object to vector
-        pthread_mutex_lock(&processed_mutex);
-        processed_abstracts.push_back(current_abstract);
-        pthread_mutex_unlock(&processed_mutex);
+        pthread_mutex_lock(&vectorPushMutex);
+        processedAbstracts.push_back(currentAbstract);
+        pthread_mutex_unlock(&vectorPushMutex);
         //////////////////////////////////////////////
     }
 
@@ -135,7 +161,7 @@ void *calculateScore(void *params)
 }
 
 // Comparison function for Abstract class according to their scores
-bool compareAbstract(shared_ptr<Abstract> a1, shared_ptr<Abstract> a2)
+bool compareAbstracts(shared_ptr<Abstract> a1, shared_ptr<Abstract> a2)
 {
     if (abs(a1->score - a2->score) < 0.0001)
     {
@@ -184,10 +210,10 @@ int main(int argc, char *argv[])
         words.push_back(word);
     }
 
-    // Reading abstracts
+    // Reading soon to be processed abstracts
     while (getline(inputFile, line))
     {
-        unprocessed_abstracts.push(make_shared<Abstract>(line));
+        waitingAbstracts.push(line);
     }
 
     // Checks if thread count is lower than file count. If it is lower, sets thread count equal to file count
@@ -197,7 +223,7 @@ int main(int argc, char *argv[])
     }
 
     // Opens the outputfile for threads to use
-    outputFile.open(outputFileName);
+    outputFile.open(outputFileName, ofstream::trunc);
 
     // Creates threads
     pthread_t threads[threadCount];
@@ -219,13 +245,13 @@ int main(int argc, char *argv[])
     outputFile << "###\n";
 
     // Sort the vector according to its score in descending order
-    sort(processed_abstracts.begin(), processed_abstracts.end(), compareAbstract);
+    sort(processedAbstracts.begin(), processedAbstracts.end(), compareAbstracts);
 
     // Prints the number of results to the file, sorted in descending order
     for (int i = 0; i < returnCount; i++)
     {
 
-        Abstract item = *processed_abstracts[i];
+        Abstract item = *processedAbstracts[i];
 
         // Sets precision to 4 and fixes length
         outputFile.precision(4);
