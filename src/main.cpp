@@ -43,7 +43,7 @@ pthread_mutex_t vectorPushMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t queueMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // GLOBAL VARIABLES
-vector<string> words;
+vector<string> targetWords;
 queue<string> waitingAbstracts;
 vector<shared_ptr<Abstract>> processedAbstracts;
 
@@ -122,7 +122,7 @@ void *calculateScore(void *params)
             for (auto tokenizedItem : tokenizedSentence)
             {
                 // Compare the abstract content with given words via word by word comparison
-                for (auto word : words)
+                for (auto word : targetWords)
                 {
                     // Adding given words to the unique words set
                     unionOfWords.insert(word);
@@ -204,10 +204,10 @@ int main(int argc, char *argv[])
     getline(inputFile, line);
     stringstream word_stream(line);
 
-    // Tokenizes words
+    // Tokenizes target words and pushes to the vector
     while (word_stream >> word)
     {
-        words.push_back(word);
+        targetWords.push_back(word);
     }
 
     // Reading soon to be processed abstracts
