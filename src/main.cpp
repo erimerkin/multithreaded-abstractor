@@ -13,18 +13,31 @@
  *  There are 4 global variables that will be shared across all threads: a string vector holding the words that will be searched (words);
  *  a queue that stores unprocessed abstracts(waitingAbstracts); vector of shared pointers to Abstract objects that stores score, 
  *  summary and filename (processedAbstracts); an output file stream so that all threads can write what they are processing (outputFile).
- *  Operations on these 4 global variables are done with 2 mutex locks in different parts of the function: queueMutex is locked when a 
+ *  Operations on these 4 global variables are done with 2 mutex locks in different parts of the function: queueMutex locked when a 
  *  thread tries to find a new abstract to read and process, and write the information that it is processing that abstract; vectorPushMutex
- *  is used for pushing created shared pointers to Abstract objects so it is locked for that operation only. Also use of shared_ptr ensures
+ *  used for pushing created shared pointers to Abstract objects so it is locked for that operation only. Also use of shared_ptr ensures
  *  that created object is accessible from main thread which then sorts and parses it to generate results and outputs.
  * 
+ *  So to summarize how the program works: Main process reads from the given input file and creates threads, lists for target words 
+ *  and abstract files. The main thread then initializes the output file and opens it for writing. Then N number of threads are created, and 
+ *  they take items from queue of abstracts that is still unprocessed which needs mutex for synchronization purposes. As the thread 
+ *  gets the abstract file's name, it reads from it and compares the words. If a word is in a sentence, the program pushes all the words till a dot 
+ *  to a vector and then pushes that vector to the new Abstract object's summary vector. After calculating score and iterating every tokenized 
+ *  word, Abstract object is pushed to processed abstracts list with mutex lock in place.
+ * 
+ *  To conclude, this program's implementation doesn't differ much from a single threaded program. To transform it to a multithreaded program
+ *  it just needed pthreads library and use of 3 lines of code, but the biggest issue is the data syncronization on modification. To achieve data synchronization,
+ *  having 2 different critical regions with mutex was enough for this project. So in my opinion, the project was very educative for an entry 
+ *  to multithreaded programming. 
+ * 
  *  Note: While reading abstracts the path is set in a way that all the abstracts will be in ../abstracts folder relative to the executable.
- *  So if the program is ran from another directory which doesn't have the abstacts folder that stores the files, the output will be wrong.
+ *  So if the program is ran from another directory which doesn't have the abstacts folder that stores the files, the program won't run properly.
  * 
  *  Input arguments needs to be given in ABSOLUTE PATH.
  *  Running:
  *  > make
  *  > ./algorithm.out ABSOLUTE_PATH_OF_INPUT_FILE     ABSOLUTE_PATH_OF_OUTPUT_FILE
+ * 
  */
 
 #include <iostream>
@@ -37,6 +50,8 @@
 #include <pthread.h>
 
 #include "abstract.h"
+
+using namespace std;
 
 // MUTEX INITIALIZATION
 pthread_mutex_t vectorPushMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -92,6 +107,11 @@ void *calculateScore(void *params)
         ifstream abstractFile;
         string absolutePath = "../abstracts/" + poppedAbstract;
         abstractFile.open(absolutePath);
+        // If file can't be opened thread exits
+        if (!abstractFile.is_open())
+        {
+            break;
+        }
 
         // Reading word by word seperated by whitespace
         while (abstractFile >> token)
@@ -243,6 +263,13 @@ int main(int argc, char *argv[])
 
     // Print as threads finish running
     outputFile << "###\n";
+
+    // Checking if abstracts are handled correctly
+    if (processedAbstracts.size() == 0)
+    {
+        printf("[ERROR] Abstract files couldn't be opened\n");
+        return -1;
+    }
 
     // Sort the vector according to its score in descending order
     sort(processedAbstracts.begin(), processedAbstracts.end(), compareAbstracts);
