@@ -7,8 +7,8 @@
  *  thread count and returned result size is all depends on given input file. Outputs are printed to the file given in
  *  command line execution, also the program will delete the contents of the file before writing to it. Input file will
  *  be read from main process and correspoding threads and list will be created. The reading is done via line by line and 
- *  word by word (ignoring whitespaces). The program also compares number of abstract files and number of threads and if the
- *  number of abstract files given is smaller than thread count, it will change the count to abstract file count.
+ *  word by word (ignoring whitespaces). The program also compares number of abstract files and number of threads so that if the
+ *  number of abstract files given is smaller than thread count, thread count will be equalized to file count.
  * 
  *  There are 4 global variables that will be shared across all threads: a string vector holding the words that will be searched (words);
  *  a queue that stores unprocessed abstracts(waitingAbstracts); vector of shared pointers to Abstract objects that stores score, 
