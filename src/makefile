@@ -1,7 +1,5 @@
-PARAMETERS = -lpthread -std=c++11
-
 all: main.cpp abstract.o
-	@g++ $(PARAMETERS) -o abstractor.out main.cpp abstract.o 
+	@g++ -std=c++11 -o abstractor.out main.cpp abstract.o -lpthread
 	@echo "Program compiled successfully, executable abstractor.out is created."
 
 abstract.o: abstract.h abstract.cpp
@@ -9,6 +7,6 @@ abstract.o: abstract.h abstract.cpp
 
 
 clean:
-	@rm -r *.o *.out
-
+	@rm -rf *.o *.out 
+	@echo "Object and executable files are removed successfully."
 
